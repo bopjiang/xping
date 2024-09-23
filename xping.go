@@ -14,12 +14,14 @@ var (
 	timeout  time.Duration
 	port     int
 	verbose  bool
+	host     string
 )
 
 func init() {
 	flag.IntVar(&count, "c", 4, "number of ping packets to send")
 	flag.DurationVar(&interval, "i", time.Second, "interval between pings")
 	flag.DurationVar(&timeout, "W", time.Second, "timeout for each reply")
+	flag.StringVar(&host, "h", "", "hostname or IP address to ping")
 	flag.IntVar(&port, "p", 80, "TCP port to connect to")
 	flag.BoolVar(&verbose, "v", false, "verbose output")
 }
@@ -27,16 +29,19 @@ func init() {
 func main() {
 	flag.Parse()
 
-	if flag.NArg() < 1 {
-		fmt.Println("Please provide a hostname or IP address")
+	// Initial DNS lookup
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		fmt.Printf("Could not resolve host %s: %v\n", host, err)
 		os.Exit(1)
 	}
+	ip := ips[0]
 
-	host := flag.Arg(0)
-	pingTCP(host, port)
+	fmt.Printf("PING %s (%s) on TCP port %d\n", host, ip, port)
+	pingTCP(host, ip.String(), port)
 }
 
-func pingTCP(host string, port int) {
+func pingTCP(host, ip string, port int) {
 	var successful, failed int
 	var totalTCPTime, totalDNSTime, totalTime float64
 	var minTCPTime, maxTCPTime, minDNSTime, maxDNSTime, minTotalTime, maxTotalTime float64
@@ -52,15 +57,15 @@ func pingTCP(host string, port int) {
 		dnsDuration := time.Since(dnsStart).Seconds() * 1000 // Convert to milliseconds
 
 		if err != nil {
-			fmt.Printf("%d: Failed - DNS: %.3fms, TCP: N/A (DNS resolution failed: %v)\n", i+1, dnsDuration, err)
+			fmt.Printf("From %s: tcp_seq=%d DNS resolution failed: %v\n", ip, i+1, err)
 			failed++
 			continue
 		}
 
-		ip := ips[0]
+		resolvedIP := ips[0]
 
 		// TCP connection timing
-		address := fmt.Sprintf("%s:%d", ip, port)
+		address := fmt.Sprintf("%s:%d", resolvedIP, port)
 		tcpStart := time.Now()
 		conn, err := net.DialTimeout("tcp", address, timeout)
 		tcpDuration := time.Since(tcpStart).Seconds() * 1000 // Convert to milliseconds
@@ -68,10 +73,10 @@ func pingTCP(host string, port int) {
 		totalDuration := dnsDuration + tcpDuration
 
 		if err != nil {
-			fmt.Printf("%d: Failed - DNS: %.3fms, TCP: failed (%.3fms, %v), Total: %.3fms\n", i+1, dnsDuration, tcpDuration, err, totalDuration)
+			fmt.Printf("From %s: tcp_seq=%d Port %d closed (%.3f ms)\n", resolvedIP, i+1, port, totalDuration)
 			failed++
 		} else {
-			fmt.Printf("%d: Success - DNS: %.3fms, TCP: %.3fms, Total: %.3fms\n", i+1, dnsDuration, tcpDuration, totalDuration)
+			fmt.Printf("From %s: tcp_seq=%d Port %d open time=%.3f ms\n", resolvedIP, i+1, port, totalDuration)
 			conn.Close()
 			successful++
 
