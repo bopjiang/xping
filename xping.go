@@ -38,8 +38,8 @@ func main() {
 
 func pingTCP(host string, port int) {
 	var successful, failed int
-	var totalTCPTime, totalDNSTime time.Duration
-	var minTCPTime, maxTCPTime, minDNSTime, maxDNSTime time.Duration
+	var totalTCPTime, totalDNSTime, totalTime float64
+	var minTCPTime, maxTCPTime, minDNSTime, maxDNSTime, minTotalTime, maxTotalTime float64
 
 	for i := 0; i < count; i++ {
 		if i > 0 {
@@ -49,10 +49,10 @@ func pingTCP(host string, port int) {
 		// DNS resolution timing
 		dnsStart := time.Now()
 		ips, err := net.LookupIP(host)
-		dnsDuration := time.Since(dnsStart)
+		dnsDuration := time.Since(dnsStart).Seconds() * 1000 // Convert to milliseconds
 
 		if err != nil {
-			fmt.Printf("%d: Could not resolve host %s: %v\n", i+1, host, err)
+			fmt.Printf("%d: Failed - DNS: %.3fms, TCP: N/A (DNS resolution failed: %v)\n", i+1, dnsDuration, err)
 			failed++
 			continue
 		}
@@ -63,13 +63,15 @@ func pingTCP(host string, port int) {
 		address := fmt.Sprintf("%s:%d", ip, port)
 		tcpStart := time.Now()
 		conn, err := net.DialTimeout("tcp", address, timeout)
-		tcpDuration := time.Since(tcpStart)
+		tcpDuration := time.Since(tcpStart).Seconds() * 1000 // Convert to milliseconds
+
+		totalDuration := dnsDuration + tcpDuration
 
 		if err != nil {
-			fmt.Printf("%d: Failed - DNS: %v, TCP: failed (%v)\n", i+1, dnsDuration, err)
+			fmt.Printf("%d: Failed - DNS: %.3fms, TCP: failed (%.3fms, %v), Total: %.3fms\n", i+1, dnsDuration, tcpDuration, err, totalDuration)
 			failed++
 		} else {
-			fmt.Printf("%d: Success - DNS: %v, TCP: %v\n", i+1, dnsDuration, tcpDuration)
+			fmt.Printf("%d: Success - DNS: %.3fms, TCP: %.3fms, Total: %.3fms\n", i+1, dnsDuration, tcpDuration, totalDuration)
 			conn.Close()
 			successful++
 
@@ -80,6 +82,15 @@ func pingTCP(host string, port int) {
 			}
 			if tcpDuration > maxTCPTime {
 				maxTCPTime = tcpDuration
+			}
+
+			// Update Total time statistics
+			totalTime += totalDuration
+			if minTotalTime == 0 || totalDuration < minTotalTime {
+				minTotalTime = totalDuration
+			}
+			if totalDuration > maxTotalTime {
+				maxTotalTime = totalDuration
 			}
 		}
 
@@ -98,14 +109,18 @@ func pingTCP(host string, port int) {
 	fmt.Printf("%d packets transmitted, %d successful, %d failed\n", count, successful, failed)
 	
 	if successful > 0 {
-		avgTCPTime := totalTCPTime / time.Duration(successful)
-		avgDNSTime := totalDNSTime / time.Duration(count)
-		
-		fmt.Printf("\nTCP Connection Statistics:\n")
-		fmt.Printf("min/avg/max = %v/%v/%v\n", minTCPTime, avgTCPTime, maxTCPTime)
+		avgTCPTime := totalTCPTime / float64(successful)
+		avgDNSTime := totalDNSTime / float64(count)
+		avgTotalTime := totalTime / float64(successful)
 		
 		fmt.Printf("\nDNS Resolution Statistics:\n")
-		fmt.Printf("min/avg/max = %v/%v/%v\n", minDNSTime, avgDNSTime, maxDNSTime)
+		fmt.Printf("min/avg/max = %.3f/%.3f/%.3f ms\n", minDNSTime, avgDNSTime, maxDNSTime)
+		
+		fmt.Printf("\nTCP Connection Statistics:\n")
+		fmt.Printf("min/avg/max = %.3f/%.3f/%.3f ms\n", minTCPTime, avgTCPTime, maxTCPTime)
+		
+		fmt.Printf("\nTotal Time Statistics:\n")
+		fmt.Printf("min/avg/max = %.3f/%.3f/%.3f ms\n", minTotalTime, avgTotalTime, maxTotalTime)
 	}
 }
 
